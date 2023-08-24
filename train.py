@@ -12,7 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from config import Config
 from model.detector import Detector
-from model.utils import load_model_checkpoint
+from model.utils import load_model_checkpoint, project_bboxes
 
 # Dataset
 class CocoDataset(Dataset):
@@ -34,12 +34,25 @@ class CocoDataset(Dataset):
     def __getitem__(self, key):
         _id = self.image_id[key]
         image_path = os.path.join(self.config.image_dir, _id+'.jpg')
-        annotation_path = image_path = os.path.join(self.config.image_dir, _id+'.json')
-        image = Image.open(image_path).resize((self.config.image_size, self.config.image_size))
+        annotation_path = os.path.join(self.config.annotation_dir, _id+'.json')
+        image = Image.open(image_path)
+        # get image height and width
+        iwidth, iheight = image.size
+        image = image.resize((self.config.image_size, self.config.image_size))
         
         box_category = json.load(open(annotation_path, 'r'))['box_category']
-        bbox = list(map(lambda x: x[0], box_category))
+        def bbox_helper(l):
+            box = l[0]
+            x,y,w,h = box
+            return [x,y,x+w,y+h]
+        bbox = list(map(bbox_helper, box_category))
         bbox = torch.tensor(bbox)
+        
+        # project bbox to resize image scale
+        bbox = project_bboxes(
+            bbox.unsqueeze(0), iwidth/self.config.image_size, iheight/self.config.image_size, mode='p2a'
+        ).squeeze(0)
+        
         k = max(0, self.config.max_bbox - bbox.shape[0])
         if k != 0:
             invalid_pad = torch.ones((k,4)) * -1

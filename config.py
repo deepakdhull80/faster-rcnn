@@ -6,7 +6,7 @@ class Config:
     anchor_pos_threshold: int = 0.7
     anchor_neg_threshold: int = 0.3
     max_bbox: int = 32
-    model_name: str = "VGG"
+    backbone_model_name: str = "VGG"
     image_dir: str = None
     annotation_dir: str = None
     batch_size: int = 32

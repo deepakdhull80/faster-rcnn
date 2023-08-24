@@ -1,3 +1,4 @@
+import os
 import torch
 import torchvision.ops as ops
 
@@ -70,6 +71,8 @@ def generate_proposals(anchors, offsets):
 
 
 def load_model_checkpoint(model, checkpoint_path, map_location='cpu'):
+    if not os.path.exists(checkpoint_path):
+        return model
     state_dict = torch.load(checkpoint_path, map_location=map_location)
     print(model.load_state_dict(state_dict))
     return model
