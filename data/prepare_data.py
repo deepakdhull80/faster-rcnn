@@ -46,7 +46,7 @@ def preprocess_coco_annotations(filename):
     f_df = merge_df.groupby(['file_name', 'image_id']).apply(helper).reset_index()
     f_df = f_df.rename(columns={0:"box_category"})
 
-    for _, row in tqdm(merge_df.iterrows(), total=merge_df.shape[0]):
+    for _, row in tqdm(f_df.iterrows(), total=f_df.shape[0]):
         filename = row['file_name'].replace(".jpg",'.json')
         json.dump(row.to_dict(),open(f"{ANNOTATION_PATH}/{filename}",'w'))
     

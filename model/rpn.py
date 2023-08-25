@@ -68,12 +68,10 @@ class RegionProposeNetwork(nn.Module):
         x = self.conv(features)
         _cls = self.conv_cls(x)
         _boxes = self.conv_boxes(x)
-        
         self.scale_factor = self.image_size // x.shape[-1]
         # base_anchor -> (1, out_size, out_size, n_anchor, 4)
-        base_anchor = get_anchor_base(x.shape[-1], self.anchor_ratio, self.anchor_scale)
+        base_anchor = get_anchor_base(x.shape[-1], self.anchor_ratio, self.anchor_scale).to(features.device)
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
-        
         # gt_boxes -> (batch_size, max_boxes, 4)
         gt_boxes = project_bboxes(gt_boxes, self.scale_factor, self.scale_factor, mode="p2a")
         
@@ -82,15 +80,10 @@ class RegionProposeNetwork(nn.Module):
             base_anchor, gt_boxes, self.pos_threshold, self.neg_threshold
         )
         
-        
-        pred_pos_cls = _cls.view(-1)[pos_anchor_idx]
-        pred_offset = _boxes.view(-1, 4)[pos_anchor_idx]
-        
-        
+        pred_pos_cls = _cls.contiguous().view(-1)[pos_anchor_idx]
+        pred_offset = _boxes.contiguous().view(-1, 4)[pos_anchor_idx]
         pred_neg_cls = _cls.view(-1)[neg_anchor_idx]
-        
         proposals = generate_proposals(pos_anchor_box, pred_offset)
-        
         ''' for loss function 
         
             we need positive gt_offset_boxes, pred_offset_boxes, gt_score, pred_score
@@ -98,7 +91,6 @@ class RegionProposeNetwork(nn.Module):
         '''
         cls_loss = calc_cls_loss(pred_pos_cls, pred_neg_cls)
         reg_loss = calc_bbox_reg_loss(gt_offset, pred_offset)
-        
         total_rpn_loss = self.w_conf * cls_loss + self.w_reg * reg_loss
         return total_rpn_loss, proposals, all_box_sep
     
@@ -116,12 +108,13 @@ class RegionProposeNetwork(nn.Module):
         pos_anchor_box = base_anchor.view(-1, 4)[pos_anchor_idx]
         pos_gt_box = gt_boxes.view(-1, 4)[pos_box_idx]
         all_box_sep = torch.where(mask)[0]
-
         gt_offset = calc_gt_offsets(pos_anchor_box, pos_gt_box)
         
         # negative index and score
         neg_mask = iou_metric < neg_threshold
         neg_anchor_idx = torch.where(neg_mask.flatten(0, 1))[1]
+        
+        neg_anchor_idx = neg_anchor_idx[torch.randint(low=0, high=neg_anchor_idx.shape[0], size=(pos_anchor_idx.shape[0],))]
         return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx
         
 if __name__ == "__main__":

@@ -162,3 +162,4 @@ checkpoint/*
 data/*.zip
 data/annotations/*
 data/images/*
+logs/
