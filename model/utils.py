@@ -36,15 +36,26 @@ def iou_scores(
     
     return iou_metric
 
+
+
 def calc_gt_offsets(pos_anc_coords, gt_bbox_mapping):
     pos_anc_coords = ops.box_convert(pos_anc_coords, in_fmt='xyxy', out_fmt='cxcywh')
     gt_bbox_mapping = ops.box_convert(gt_bbox_mapping, in_fmt='xyxy', out_fmt='cxcywh')
 
     gt_cx, gt_cy, gt_w, gt_h = gt_bbox_mapping[:, 0], gt_bbox_mapping[:, 1], gt_bbox_mapping[:, 2], gt_bbox_mapping[:, 3]
     anc_cx, anc_cy, anc_w, anc_h = pos_anc_coords[:, 0], pos_anc_coords[:, 1], pos_anc_coords[:, 2], pos_anc_coords[:, 3]
-
+    
+    def fix_zero(x):
+        x[x == 0] = 1
+        return x
+    
+    gt_w = fix_zero(gt_w)
+    gt_h = fix_zero(gt_h)
+    
     tx_ = (gt_cx - anc_cx)/anc_w
     ty_ = (gt_cy - anc_cy)/anc_h
+    # print("gt_w", gt_w.min(), gt_w.mean(), gt_w.sum())
+    # print("gt_h", gt_h.min(), gt_h.mean(), gt_h.sum())
     tw_ = torch.log(gt_w / anc_w)
     th_ = torch.log(gt_h / anc_h)
 

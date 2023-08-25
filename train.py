@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 import torchvision
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from config import Config
 from model.detector import Detector
@@ -50,7 +51,7 @@ class CocoDataset(Dataset):
             return [x,y,x+w,y+h]
         bbox = list(map(bbox_helper, box_category))
         bbox = torch.tensor(bbox)
-        
+        # print(_id, bbox)
         # project bbox to resize image scale
         bbox = project_bboxes(
             bbox.unsqueeze(0), iwidth/self.config.image_size, iheight/self.config.image_size, mode='p2a'
@@ -94,8 +95,8 @@ def get_dl(config, train_ids, val_ids):
     trainds = CocoDataset(train_ids, config)
     valds = CocoDataset(val_ids, config)
     
-    traindl = DataLoader(trainds, batch_size=config.batch_size)
-    valdl = DataLoader(valds, batch_size=config.batch_size)
+    traindl = DataLoader(trainds, batch_size=config.batch_size, num_workers=config.init_worker)
+    valdl = DataLoader(valds, batch_size=config.batch_size, num_workers=config.init_worker)
     return traindl, valdl
 
 # Model
@@ -122,18 +123,17 @@ def run_step(epoch, dataloader, model, optimizer, train=True, device=torch.devic
         optimizer.zero_grad()
         images, bbox = batch[0].to(device), batch[1].to(device)
         proposal, loss = model(images, bbox)
-        # print(loss)
         if train:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
             loss.backward()
             optimizer.step()
         with torch.no_grad():
             total_loss += loss.item()
-        # print(sum([param.mean() for param in model.parameters()]))
         itr.set_description(f"Epoch({mode}): {epoch}, Loss:{loss.item():.5f}, Avg Loss:{total_loss/(1+i) :.5f}")
     return total_loss / len(dataloader)
     
-def run():
+    
+def run(writer=None):
     train, val = create_dataset(Config)
     train_dl, val_dl = get_dl(Config, train, val)
     device = torch.device(Config.device)
@@ -143,7 +143,15 @@ def run():
     for epoch in range(Config.epoch):
         train_loss = run_step(epoch, train_dl, model, optim, device=device)
         val_loss = run_step(epoch, val_dl, model, optim, train=False, device=device)
-        continue
+        
+        if writer:
+            writer.add_scalar('training loss',
+                                train_loss,
+                                epoch+1)
+            
+            writer.add_scalar('Validation loss',
+                                val_loss,
+                                epoch+1)
         if val_loss < glob_loss:
             glob_loss = val_loss
             # save checkpoint
@@ -151,4 +159,5 @@ def run():
             print("Checkpoint saved")
 if __name__ == '__main__':
     print("Starting training")
-    run()
+    writer = SummaryWriter('logs/faster-rcnn')
+    run(writer)

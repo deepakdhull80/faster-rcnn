@@ -9,7 +9,7 @@ class Config:
     backbone_model_name: str = "VGG"
     image_dir: str = "/home/ubuntu/user-files/deepak.dhull/workspace/practice/faster-rcnn/data/images/train2017"
     annotation_dir: str = "/home/ubuntu/user-files/deepak.dhull/workspace/practice/faster-rcnn/data/annotations"
-    batch_size: int = 1
+    batch_size: int = 8*5
     model_save_dir: str = "/home/ubuntu/user-files/deepak.dhull/workspace/practice/faster-rcnn/checkpoint"
     model_version: str = 'v1'
     model_name: str = "detector"
@@ -17,3 +17,4 @@ class Config:
     lr: float = 1e-3
     weight_decay: float = 0
     epoch: int = 30
+    init_worker: int = 20
