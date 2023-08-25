@@ -4,6 +4,7 @@ from glob import glob
 from PIL import Image
 import json
 
+from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import torch
 import torch.nn as nn
@@ -14,6 +15,8 @@ from config import Config
 from model.detector import Detector
 from model.utils import load_model_checkpoint, project_bboxes
 
+# torch.autograd.set_detect_anomaly(True)
+ 
 # Dataset
 class CocoDataset(Dataset):
     def __init__(self, image_id, config):
@@ -58,6 +61,8 @@ class CocoDataset(Dataset):
             invalid_pad = torch.ones((k,4)) * -1
             bbox = torch.concat([bbox, invalid_pad])
         
+        bbox = bbox[:self.config.max_bbox,:]
+        
         image = self.transform(image)
         
         if image.shape[0] == 1:
@@ -71,10 +76,17 @@ class CocoDataset(Dataset):
 
 # Create Training Dataset
 def create_dataset(config):
-    images = glob(config.image_dir+"/")
+    images = glob(config.image_dir+"/*jpg")
     image_id = list(map(lambda x: x.rsplit("/",1)[-1].replace(".jpg",""), filter(lambda x: x.endswith('.jpg'),images)))
+    
+    # annotation avalable
+    anno = glob(config.annotation_dir+"/*.json")
+    anno_id = list(map(lambda x: x.rsplit("/",1)[-1].replace(".json",""), filter(lambda x: x.endswith('.json'),anno)))
+    
+    image_id = list(set(image_id).intersection(anno_id))
+    
     train_image_id, val_image_id = train_test_split(image_id, train_size=0.8, random_state=32, shuffle=True)
-    print(train_image_id, val_image_id)
+    print(len(train_image_id), len(val_image_id))
     return train_image_id, val_image_id
     
 # Dataloader
@@ -94,20 +106,49 @@ def get_model(config, device):
     return detector.to(device)
 
 # Loss function
-
+# loss is mse + bce computed in model.rpn itself
 
 # Optimizer
-
+def get_optim(model, lr=1e-3, weight_decay=1e-6):
+    return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
 
 # Training Step
-def run_step(dataloader, model, optimizer, loss_fn, train=True):
-    pass
-
-
+def run_step(epoch, dataloader, model, optimizer, train=True, device=torch.device("cpu")):
+    itr = tqdm(dataloader, total=len(dataloader))
+    model = model.train(train)
+    total_loss = 0
+    mode = "train" if train else "eval"
+    for i, batch in enumerate(itr):
+        optimizer.zero_grad()
+        images, bbox = batch[0].to(device), batch[1].to(device)
+        proposal, loss = model(images, bbox)
+        # print(loss)
+        if train:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
+            loss.backward()
+            optimizer.step()
+        with torch.no_grad():
+            total_loss += loss.item()
+        # print(sum([param.mean() for param in model.parameters()]))
+        itr.set_description(f"Epoch({mode}): {epoch}, Loss:{loss.item():.5f}, Avg Loss:{total_loss/(1+i) :.5f}")
+    return total_loss / len(dataloader)
+    
 def run():
-    pass
-
-
+    train, val = create_dataset(Config)
+    train_dl, val_dl = get_dl(Config, train, val)
+    device = torch.device(Config.device)
+    model = get_model(Config, device)
+    optim = get_optim(model,Config.lr, Config.weight_decay)
+    glob_loss = 1e3
+    for epoch in range(Config.epoch):
+        train_loss = run_step(epoch, train_dl, model, optim, device=device)
+        val_loss = run_step(epoch, val_dl, model, optim, train=False, device=device)
+        continue
+        if val_loss < glob_loss:
+            glob_loss = val_loss
+            # save checkpoint
+            torch.save(model.state_dict(), os.path.join(Config.model_save_dir, f"{Config.model_name}_{Config.model_version}.pt"))
+            print("Checkpoint saved")
 if __name__ == '__main__':
     print("Starting training")
     run()

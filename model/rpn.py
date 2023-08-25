@@ -68,10 +68,10 @@ class RegionProposeNetwork(nn.Module):
         x = self.conv(features)
         _cls = self.conv_cls(x)
         _boxes = self.conv_boxes(x)
-        
+        # print("_cls",_cls.shape)
         self.scale_factor = self.image_size // x.shape[-1]
         # base_anchor -> (1, out_size, out_size, n_anchor, 4)
-        base_anchor = get_anchor_base(x.shape[-1], self.anchor_ratio, self.anchor_scale)
+        base_anchor = get_anchor_base(x.shape[-1], self.anchor_ratio, self.anchor_scale).to(features.device)
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
         
         # gt_boxes -> (batch_size, max_boxes, 4)
@@ -82,10 +82,8 @@ class RegionProposeNetwork(nn.Module):
             base_anchor, gt_boxes, self.pos_threshold, self.neg_threshold
         )
         
-        
-        pred_pos_cls = _cls.view(-1)[pos_anchor_idx]
-        pred_offset = _boxes.view(-1, 4)[pos_anchor_idx]
-        
+        pred_pos_cls = _cls.contiguous().view(-1)[pos_anchor_idx]
+        pred_offset = _boxes.contiguous().view(-1, 4)[pos_anchor_idx]
         
         pred_neg_cls = _cls.view(-1)[neg_anchor_idx]
         
@@ -96,9 +94,10 @@ class RegionProposeNetwork(nn.Module):
             we need positive gt_offset_boxes, pred_offset_boxes, gt_score, pred_score
             negative gt_score, pred_score
         '''
+        # print("pred_pos, pred_neg",len(pred_pos_cls), len(pred_neg_cls))
         cls_loss = calc_cls_loss(pred_pos_cls, pred_neg_cls)
         reg_loss = calc_bbox_reg_loss(gt_offset, pred_offset)
-        
+        # print("[Debug]",cls_loss, reg_loss)
         total_rpn_loss = self.w_conf * cls_loss + self.w_reg * reg_loss
         return total_rpn_loss, proposals, all_box_sep
     
@@ -122,6 +121,8 @@ class RegionProposeNetwork(nn.Module):
         # negative index and score
         neg_mask = iou_metric < neg_threshold
         neg_anchor_idx = torch.where(neg_mask.flatten(0, 1))[1]
+        
+        neg_anchor_idx = neg_anchor_idx[torch.randint(low=0, high=neg_anchor_idx.shape[0], size=(pos_anchor_idx.shape[0],))]
         return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx
         
 if __name__ == "__main__":
