@@ -62,7 +62,7 @@ class RegionProposeNetwork(nn.Module):
         
         n_boxes = 4 * len(self.anchor_scale) * len(self.anchor_ratio)
         self.conv_boxes = nn.Conv2d(feature_size, n_boxes, 1, 1)
-        
+        self.anchor_box = get_anchor_base(out_size, self.anchor_ratio, self.anchor_scale)
         self.w_conf, self.w_reg = 1, 5
     
     def forward(self, features, gt_boxes=None):
@@ -72,7 +72,8 @@ class RegionProposeNetwork(nn.Module):
         _boxes = self.conv_boxes(x)
         self.scale_factor = self.image_size // x.shape[-1]
         # base_anchor -> (1, out_size, out_size, n_anchor, 4)
-        base_anchor = get_anchor_base(x.shape[-1], self.anchor_ratio, self.anchor_scale).to(features.device)
+        anchor_box = self.anchor_box.clone()
+        base_anchor = anchor_box.to(features.device)
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
         # gt_boxes -> (batch_size, max_boxes, 4)
         gt_boxes = project_bboxes(gt_boxes, self.scale_factor, self.scale_factor, mode="p2a")
@@ -120,26 +121,31 @@ class RegionProposeNetwork(nn.Module):
         return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx
         
 if __name__ == "__main__":
-    
+    import time
     from config import Config
     from model.backbone import get_backbone_f_extractor
-    
-    img = torch.randn(2, 3, Config.image_size, Config.image_size)
+    image_size = 768
+    img = torch.randn(2, 3, image_size, image_size)
     
     boxes = torch.randn(2,6,4) * 200
     
-    extractor, out_size, feature_size = get_backbone_f_extractor("VGG")
+    extractor,feature_size, out_size = get_backbone_f_extractor("VGG")
     
     rpn = RegionProposeNetwork(
         Config.image_size,
+        out_size,
         feature_size, 
         Config.anchor_scales, 
         Config.anchor_ratios,
     )
     
     feature = extractor(img)
+    st = time.time()
+    
     total_rpn_loss, proposals, all_box_sep = rpn(feature, boxes)
     print(total_rpn_loss)
     print(proposals.shape)
     print(all_box_sep)
     print(proposals[:5])
+    
+    print(f"Time Taken: {time.time() - st:.2f} sec")
