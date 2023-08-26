@@ -13,5 +13,5 @@ def calc_cls_loss(conf_scores_pos, conf_scores_neg):
 
     
 def calc_bbox_reg_loss(GT_offsets, offsets_pos):
-    # print("GT_offsets, offsets_pos",GT_offsets, offsets_pos)
-    return F.mse_loss(GT_offsets, offsets_pos)
+    n = GT_offsets.shape[0]
+    return 1/n * (GT_offsets - offsets_pos).abs().sum()

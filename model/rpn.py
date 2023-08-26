@@ -62,7 +62,8 @@ class RegionProposeNetwork(nn.Module):
         
         n_boxes = 4 * len(self.anchor_scale) * len(self.anchor_ratio)
         self.conv_boxes = nn.Conv2d(feature_size, n_boxes, 1, 1)
-        self.anchor_box = get_anchor_base(out_size, self.anchor_ratio, self.anchor_scale)
+        # here -2 we are doing of self.conv(features)
+        self.anchor_box = get_anchor_base(out_size-2, self.anchor_ratio, self.anchor_scale)
         self.w_conf, self.w_reg = 1, 5
     
     def forward(self, features, gt_boxes=None):
@@ -77,7 +78,6 @@ class RegionProposeNetwork(nn.Module):
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
         # gt_boxes -> (batch_size, max_boxes, 4)
         gt_boxes = project_bboxes(gt_boxes, self.scale_factor, self.scale_factor, mode="p2a")
-        
         pos_anchor_idx, pos_anchor_box, pos_gt_box, \
             all_box_sep, gt_offset, neg_anchor_idx = self.get_req_anchor(
             base_anchor, gt_boxes, self.pos_threshold, self.neg_threshold
