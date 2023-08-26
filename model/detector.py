@@ -12,9 +12,10 @@ from model.rpn import RegionProposeNetwork
 class Detector(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
-        self.extractor, out_size, self.feature_size = get_backbone_f_extractor(config.backbone_model_name)
+        self.extractor, self.feature_size, out_size = get_backbone_f_extractor(config.backbone_model_name)
         self.rpn = RegionProposeNetwork(
             config.image_size,
+            out_size,
             self.feature_size, 
             config.anchor_scales, 
             config.anchor_ratios,

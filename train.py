@@ -103,7 +103,10 @@ def get_dl(config, train_ids, val_ids):
 def get_model(config, device):
     
     detector = Detector(config)
-    detector = load_model_checkpoint(detector, os.path.join(config.model_save_dir, f"{config.model_name}_{config.model_version}.pt"))
+    try:
+        detector = load_model_checkpoint(detector, os.path.join(config.model_save_dir, f"{config.model_name}_{config.model_version}.pt"))
+    except Exception as e:
+        print(f"[Failed] model checkpoint not able to load. {e}")
     return detector.to(device)
 
 # Loss function

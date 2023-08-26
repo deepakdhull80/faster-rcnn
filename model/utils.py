@@ -27,6 +27,7 @@ def project_bboxes(bboxes: torch.Tensor, width_scale_factor: float, height_scale
 def iou_scores(
     base_anchor, gt_boxes
     ):
+    #TODO: need to optimize
     batch_size = gt_boxes.shape[0]
     flatten_base_anchor = base_anchor.view(batch_size, -1, 4)
     iou_metric = torch.zeros(batch_size, flatten_base_anchor.shape[1], gt_boxes.shape[1])

@@ -9,6 +9,7 @@ from model.utils import project_bboxes, iou_scores, calc_gt_offsets, generate_pr
 from model.loss import calc_cls_loss, calc_bbox_reg_loss
 
 def get_anchor_base(out_size, ratios, scales):
+    # TODO:Need to optimize
     anc_x = torch.arange(out_size) + 0.5
     anc_y = torch.arange(out_size) + 0.5
     
@@ -40,6 +41,7 @@ class RegionProposeNetwork(nn.Module):
     def __init__(
         self, 
         image_size: int ,
+        out_size: int,
         feature_size: int, 
         anchor_scale: list, 
         anchor_ratio: list,
