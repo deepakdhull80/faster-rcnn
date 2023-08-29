@@ -10,11 +10,11 @@ from config import Config
 
 class BackboneName:
     VGG: str = "vgg16"
-    RESNET: str = ""
+    RESNET: str = "resnet50"
 
 feature_extractor_mapper = dict(
-    VGG={"name":'features', "n_layers": 8},
-    RESNET={"name":'features', "n_layers": 8}
+    VGG={"name":'features', "n_layers": 12},
+    RESNET={"name":None, "n_layers": 34}
 )
 
 def get_backbone_f_extractor(backbone_name: str, pretrained=True, freeze=False) -> Tuple[nn.Module, int, int]:
@@ -22,14 +22,21 @@ def get_backbone_f_extractor(backbone_name: str, pretrained=True, freeze=False) 
     model = getattr(torchvision.models, name)(pretrained=pretrained)
     
     x = torch.randn(1,3,Config.image_size, Config.image_size)
-    extractor = getattr(model, feature_extractor_mapper[backbone_name]['name'])
-    
+    if feature_extractor_mapper[backbone_name]['name'] is not None:
+        extractor = getattr(model, feature_extractor_mapper[backbone_name]['name'])
+    else:
+        extractor = model
     # get require layers
     req_layers = list(extractor.children())[:feature_extractor_mapper[backbone_name]['n_layers']]
     extractor = nn.Sequential(*req_layers)
     if not freeze:
         for param in extractor.named_parameters():
             param[1].requires_grad = True
+    
+    # if backbone_name == "VGG":
+    #     extractor.eval()
+    #     extractor[-2].train()
+    #     extractor[-1].train()
     
     x = extractor(x)
     return extractor, x.shape[1], x.shape[-1]

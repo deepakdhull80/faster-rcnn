@@ -16,8 +16,10 @@ from config import Config
 from model.detector import Detector
 from model.utils import load_model_checkpoint, project_bboxes
 
+
+category_list = [5]
+
 # torch.autograd.set_detect_anomaly(True)
- 
 # Dataset
 class CocoDataset(Dataset):
     def __init__(self, image_id, config):
@@ -49,7 +51,7 @@ class CocoDataset(Dataset):
             box = l[0]
             x,y,w,h = box
             return [x,y,x+w,y+h]
-        bbox = list(map(bbox_helper, box_category))
+        bbox = list(map(bbox_helper, filter(lambda x: x[1] in category_list, box_category)))
         bbox = torch.tensor(bbox)
         # print(_id, bbox)
         # project bbox to resize image scale
@@ -86,6 +88,12 @@ def create_dataset(config):
     
     image_id = list(set(image_id).intersection(anno_id))
     
+    # filter
+    d = json.load(open("data/annotations/annotations/instances_train2017.json"))
+    
+    valid_id = list(map(lambda x: f"{x['image_id']:012}",filter(lambda x: x['category_id'] in category_list ,d['annotations'])))
+    
+    image_id = list(set(image_id).intersection(valid_id))
     train_image_id, val_image_id = train_test_split(image_id, train_size=0.8, random_state=32, shuffle=True)
     print(len(train_image_id), len(val_image_id))
     return train_image_id, val_image_id
@@ -121,18 +129,22 @@ def run_step(epoch, dataloader, model, optimizer, train=True, device=torch.devic
     itr = tqdm(dataloader, total=len(dataloader))
     model = model.train(train)
     total_loss = 0
+    avg_reg_loss, avg_cls_loss = 0, 0
     mode = "train" if train else "eval"
     for i, batch in enumerate(itr):
         optimizer.zero_grad()
         images, bbox = batch[0].to(device), batch[1].to(device)
-        proposal, loss = model(images, bbox)
+        proposal, cls_loss, reg_loss = model(images, bbox)
+        loss = cls_loss + reg_loss
         if train:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
             loss.backward()
             optimizer.step()
         with torch.no_grad():
             total_loss += loss.item()
-        itr.set_description(f"Epoch({mode}): {epoch}, Loss:{loss.item():.5f}, Avg Loss:{total_loss/(1+i) :.5f}")
+            avg_cls_loss += cls_loss.item()
+            avg_reg_loss += reg_loss.item()
+        itr.set_description(f"Epoch({mode}): {epoch}, T_Loss:{loss.item():.3f}({total_loss/(1+i) :.3f}), cls_loss: {cls_loss.item():.3f}({avg_cls_loss/(1+i):.3f}), reg_loss: {reg_loss.item():.3f}({avg_reg_loss/(1+i):.3f})")
     return total_loss / len(dataloader)
     
     
@@ -143,6 +155,8 @@ def run(writer=None):
     model = get_model(Config, device)
     optim = get_optim(model,Config.lr, Config.weight_decay)
     glob_loss = 1e3
+    train_loss = 0
+    val_loss = 0
     for epoch in range(Config.epoch):
         train_loss = run_step(epoch, train_dl, model, optim, device=device)
         val_loss = run_step(epoch, val_dl, model, optim, train=False, device=device)
@@ -162,5 +176,6 @@ def run(writer=None):
             print("Checkpoint saved")
 if __name__ == '__main__':
     print("Starting training")
-    writer = SummaryWriter('logs/faster-rcnn')
+    writer = None
+    # writer = SummaryWriter('logs/faster-rcnn')
     run(writer)

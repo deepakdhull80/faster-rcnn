@@ -1,3 +1,4 @@
+import random
 import sys
 sys.path.append(".")
 
@@ -64,7 +65,7 @@ class RegionProposeNetwork(nn.Module):
         self.conv_boxes = nn.Conv2d(feature_size, n_boxes, 1, 1)
         # here -2 we are doing of self.conv(features)
         self.anchor_box = get_anchor_base(out_size-2, self.anchor_ratio, self.anchor_scale)
-        self.w_conf, self.w_reg = 1, 5
+        self.w_conf, self.w_reg = 1, 1
     
     def forward(self, features, gt_boxes=None):
         batch_size = features.shape[0]
@@ -94,11 +95,41 @@ class RegionProposeNetwork(nn.Module):
         '''
         cls_loss = calc_cls_loss(pred_pos_cls, pred_neg_cls)
         reg_loss = calc_bbox_reg_loss(gt_offset, pred_offset)
-        total_rpn_loss = self.w_conf * cls_loss + self.w_reg * reg_loss
-        return total_rpn_loss, proposals, all_box_sep
+        # total_rpn_loss = self.w_conf * cls_loss + self.w_reg * reg_loss
+        # temporary
+        # proposals = project_bboxes(proposals, self.scale_factor, self.scale_factor, mode="a2p")
+        
+        return cls_loss, reg_loss, proposals, all_box_sep
+    
+    def predict(self, features):
+        batch_size = features.shape[0]
+        x = self.conv(features)
+        _cls = self.conv_cls(x)
+        _boxes = self.conv_boxes(x)
+        self.scale_factor = self.image_size // x.shape[-1]
+        anchor_box = self.anchor_box.clone()
+        base_anchor = anchor_box.to(features.device)
+        base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
+        return _cls, _boxes
+        
+        
     
     def get_req_anchor(self, base_anchor, gt_boxes, pos_threshold, neg_threshold):
+        """
+        @param
+            base_anchor:
+            gt_boxes:
+            pos_threshold:
+            neg_threshold:
         
+        @return
+            pos_anchor_idx:(torch.Tensor)
+            pos_anchor_box:(torch.Tensor)
+            pos_gt_box:(torch.Tensor)
+            all_box_sep: (torch.Tensor), positive boxes index which tells box belong to which batch image.
+            gt_offset:(torch.Tensor)
+            neg_anchor_idx:(torch.Tensor)
+        """
         iou_metric = iou_scores(
             base_anchor, gt_boxes
         )
@@ -117,7 +148,8 @@ class RegionProposeNetwork(nn.Module):
         neg_mask = iou_metric < neg_threshold
         neg_anchor_idx = torch.where(neg_mask.flatten(0, 1))[1]
         
-        neg_anchor_idx = neg_anchor_idx[torch.randint(low=0, high=neg_anchor_idx.shape[0], size=(pos_anchor_idx.shape[0],))]
+        # neg_anchor_idx = neg_anchor_idx[torch.randint(low=0, high=neg_anchor_idx.shape[0], size=(pos_anchor_idx.shape[0],))]
+        neg_anchor_idx = random.sample(neg_anchor_idx.tolist(), pos_anchor_idx.shape[0])
         return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx
         
 if __name__ == "__main__":

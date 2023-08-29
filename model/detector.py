@@ -12,7 +12,14 @@ from model.rpn import RegionProposeNetwork
 class Detector(nn.Module):
     def __init__(self, config: dict):
         super().__init__()
-        self.extractor, self.feature_size, out_size = get_backbone_f_extractor(config.backbone_model_name)
+        # self.extractor, self.feature_size, out_size = get_backbone_f_extractor(config.backbone_model_name, freeze=False)
+        m = torchvision.models.resnet101(weights=torchvision.models.ResNet101_Weights.IMAGENET1K_V1)
+        self.extractor = torch.nn.Sequential(*list(m.children())[:-2])
+        self.extractor.eval()
+        self.extractor[-2].train()
+        self.extractor[-1].train()
+        self.feature_size = 2048
+        out_size = 16
         self.rpn = RegionProposeNetwork(
             config.image_size,
             out_size,
@@ -25,8 +32,8 @@ class Detector(nn.Module):
         is_eval = gt_boxes is None
         features = self.extractor(images)
         if is_eval:
-            raise NotImplementedError("Prediction is not implemented")
+            return self.rpn.predict(features)
         
-        total_rpn_loss, proposals, all_box_sep = self.rpn(features, gt_boxes)
+        cls_loss, reg_loss, proposals, all_box_sep = self.rpn(features, gt_boxes)
         
-        return proposals, total_rpn_loss
+        return proposals, cls_loss, reg_loss    
