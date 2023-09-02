@@ -103,20 +103,43 @@ class RegionProposeNetwork(nn.Module):
         
         return cls_loss, reg_loss, (proposals, expected_proposals), all_box_sep, GT_pos_class
     
-    def predict(self, features, threshold=0.9):
+    @torch.no_grad
+    def predict(self, features, conf_thresh=0.5, nms_thresh=0.7):
         batch_size = features.shape[0]
         x = self.conv(features)
-        _cls = self.conv_cls(x)
-        _boxes = self.conv_boxes(x)
         self.scale_factor = self.image_size // x.shape[-1]
+        
+        conf_scores_pred = self.conv_cls(x)
+        offsets_pred = self.conv_boxes(x)
+        
+        conf_scores_pred = conf_scores_pred.reshape(batch_size, -1)
+        offsets_pred = offsets_pred.reshape(batch_size, -1, 4)
+        
         anchor_box = self.anchor_box.clone()
         base_anchor = anchor_box.to(features.device)
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
-        # pos_indx = torch.where(_cls.view(-1)>threshold)
+        base_anchor_flat = base_anchor.reshape(batch_size, -1, 4)
         
-        return _cls, _boxes
+        proposals_final = []
+        conf_scores_final = []
+        for i in range(batch_size):
+            conf_scores = torch.sigmoid(conf_scores_pred[i])
+            offsets = offsets_pred[i]
+            anc_boxes = base_anchor_flat[i]
+            proposals = generate_proposals(anc_boxes, offsets)
+            # filter based on confidence threshold
+            conf_idx = torch.where(conf_scores >= conf_thresh)[0]
+            conf_scores_pos = conf_scores[conf_idx]
+            proposals_pos = proposals[conf_idx]
+            # filter based on nms threshold
+            nms_idx = torchvision.ops.nms(proposals_pos, conf_scores_pos, nms_thresh)
+            conf_scores_pos = conf_scores_pos[nms_idx]
+            proposals_pos = proposals_pos[nms_idx]
+
+            proposals_final.append(proposals_pos)
+            conf_scores_final.append(conf_scores_pos)
         
-        
+        return proposals_final, conf_scores_final, features
     
     def get_req_anchor(self, base_anchor, gt_boxes, gt_classes_all, pos_threshold, neg_threshold):
         """
