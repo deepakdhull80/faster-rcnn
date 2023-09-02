@@ -20,7 +20,6 @@ def project_bboxes(bboxes: torch.Tensor, width_scale_factor: float, height_scale
         
     proj_bboxes.masked_fill_(invalid_bbox_mask, -1) # fill padded bboxes back with -1
     proj_bboxes.resize_as_(bboxes)
-    
     return proj_bboxes
 
 

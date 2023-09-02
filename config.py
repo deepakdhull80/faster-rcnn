@@ -18,3 +18,14 @@ class Config:
     weight_decay: float = 1e-6
     epoch: int = 30
     init_worker: int = 20
+    roi_size: tuple = (2, 2)
+    # key -> actual category index, value is id mapper 
+    category_list: dict = {
+                5:1,
+                6:2,
+                7:3
+            }
+    
+    # backbone_model
+    last_n_layer_remove: int = 2
+    

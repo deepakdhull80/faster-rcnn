@@ -67,12 +67,15 @@ class RegionProposeNetwork(nn.Module):
         self.anchor_box = get_anchor_base(out_size-2, self.anchor_ratio, self.anchor_scale)
         self.w_conf, self.w_reg = 1, 1
     
-    def forward(self, features, gt_boxes=None):
+    def forward(self, features, gt_boxes=None, gt_class=None):
         batch_size = features.shape[0]
         x = self.conv(features)
+        out_size = features.shape[-1]
         _cls = self.conv_cls(x)
         _boxes = self.conv_boxes(x)
         self.scale_factor = self.image_size // x.shape[-1]
+        proposal_scale_factor = out_size / x.shape[-1]
+        
         # base_anchor -> (1, out_size, out_size, n_anchor, 4)
         anchor_box = self.anchor_box.clone()
         base_anchor = anchor_box.to(features.device)
@@ -80,14 +83,16 @@ class RegionProposeNetwork(nn.Module):
         # gt_boxes -> (batch_size, max_boxes, 4)
         gt_boxes = project_bboxes(gt_boxes, self.scale_factor, self.scale_factor, mode="p2a")
         pos_anchor_idx, pos_anchor_box, pos_gt_box, \
-            all_box_sep, gt_offset, neg_anchor_idx = self.get_req_anchor(
-            base_anchor, gt_boxes, self.pos_threshold, self.neg_threshold
+            all_box_sep, gt_offset, neg_anchor_idx, GT_pos_class = self.get_req_anchor(
+            base_anchor, gt_boxes, gt_class, self.pos_threshold, self.neg_threshold
         )
-        
         pred_pos_cls = _cls.contiguous().view(-1)[pos_anchor_idx]
         pred_offset = _boxes.contiguous().view(-1, 4)[pos_anchor_idx]
         pred_neg_cls = _cls.view(-1)[neg_anchor_idx]
-        proposals = generate_proposals(pos_anchor_box, pred_offset)
+        
+        proposals = generate_proposals(pos_anchor_box, pred_offset) * proposal_scale_factor
+        expected_proposals = generate_proposals(pos_anchor_box, gt_offset) * proposal_scale_factor
+                
         ''' for loss function 
         
             we need positive gt_offset_boxes, pred_offset_boxes, gt_score, pred_score
@@ -95,13 +100,10 @@ class RegionProposeNetwork(nn.Module):
         '''
         cls_loss = calc_cls_loss(pred_pos_cls, pred_neg_cls)
         reg_loss = calc_bbox_reg_loss(gt_offset, pred_offset)
-        # total_rpn_loss = self.w_conf * cls_loss + self.w_reg * reg_loss
-        # temporary
-        # proposals = project_bboxes(proposals, self.scale_factor, self.scale_factor, mode="a2p")
         
-        return cls_loss, reg_loss, proposals, all_box_sep
+        return cls_loss, reg_loss, (proposals, expected_proposals), all_box_sep, GT_pos_class
     
-    def predict(self, features):
+    def predict(self, features, threshold=0.9):
         batch_size = features.shape[0]
         x = self.conv(features)
         _cls = self.conv_cls(x)
@@ -110,11 +112,13 @@ class RegionProposeNetwork(nn.Module):
         anchor_box = self.anchor_box.clone()
         base_anchor = anchor_box.to(features.device)
         base_anchor = base_anchor.repeat(batch_size, 1, 1, 1, 1)
+        # pos_indx = torch.where(_cls.view(-1)>threshold)
+        
         return _cls, _boxes
         
         
     
-    def get_req_anchor(self, base_anchor, gt_boxes, pos_threshold, neg_threshold):
+    def get_req_anchor(self, base_anchor, gt_boxes, gt_classes_all, pos_threshold, neg_threshold):
         """
         @param
             base_anchor:
@@ -130,10 +134,11 @@ class RegionProposeNetwork(nn.Module):
             gt_offset:(torch.Tensor)
             neg_anchor_idx:(torch.Tensor)
         """
+        B, N, _ = gt_boxes.shape
         iou_metric = iou_scores(
             base_anchor, gt_boxes
-        )
-        
+        ).to(gt_boxes.device)
+        tot_anc_boxes = base_anchor.shape[1] * base_anchor.shape[2] * base_anchor.shape[3]
         # positive anchor index and it's iou score 
         max_iou_per_gt_box, _ = iou_metric.max(dim=1, keepdim=True)
         mask = torch.logical_and(iou_metric == max_iou_per_gt_box, max_iou_per_gt_box > 0)
@@ -144,13 +149,18 @@ class RegionProposeNetwork(nn.Module):
         all_box_sep = torch.where(mask)[0]
         gt_offset = calc_gt_offsets(pos_anchor_box, pos_gt_box)
         
+        _ ,max_iou_per_gt_box_idx = iou_metric.max(dim=-1, keepdim=True)
+        gt_classes_expand = gt_classes_all.view(B, 1, N).expand(B, tot_anc_boxes, N)
+        GT_class = torch.gather(gt_classes_expand, -1, max_iou_per_gt_box_idx).squeeze(-1)
+        GT_class = GT_class.flatten(start_dim=0, end_dim=1)
+        GT_class_pos = GT_class[pos_anchor_idx]
         # negative index and score
         neg_mask = iou_metric < neg_threshold
         neg_anchor_idx = torch.where(neg_mask.flatten(0, 1))[1]
         
         # neg_anchor_idx = neg_anchor_idx[torch.randint(low=0, high=neg_anchor_idx.shape[0], size=(pos_anchor_idx.shape[0],))]
         neg_anchor_idx = random.sample(neg_anchor_idx.tolist(), pos_anchor_idx.shape[0])
-        return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx
+        return pos_anchor_idx, pos_anchor_box, pos_gt_box, all_box_sep, gt_offset, neg_anchor_idx, GT_class_pos
         
 if __name__ == "__main__":
     import time
@@ -160,13 +170,14 @@ if __name__ == "__main__":
     img = torch.randn(2, 3, image_size, image_size)
     
     boxes = torch.randn(2,6,4) * 200
-    
-    extractor,feature_size, out_size = get_backbone_f_extractor("VGG")
+    _class = torch.randint(0,2,(2,6))
+    m = torchvision.models.resnet101(weights=torchvision.models.ResNet101_Weights.IMAGENET1K_V1)
+    extractor = torch.nn.Sequential(*list(m.children())[:-2])
     
     rpn = RegionProposeNetwork(
         Config.image_size,
-        out_size,
-        feature_size, 
+        16,
+        2048, 
         Config.anchor_scales, 
         Config.anchor_ratios,
     )
@@ -174,10 +185,10 @@ if __name__ == "__main__":
     feature = extractor(img)
     st = time.time()
     
-    total_rpn_loss, proposals, all_box_sep = rpn(feature, boxes)
-    print(total_rpn_loss)
-    print(proposals.shape)
-    print(all_box_sep)
-    print(proposals[:5])
-    
+    cls_loss, reg_loss, (proposals,expected_proposals), all_box_sep, GT_pos_class = rpn(feature, boxes, _class)
+    # print(pos_anchor_idx)
+    # print(proposals.shape)
+    # print(all_box_sep)
+    # print(proposals[:5])
+    print(cls_loss, reg_loss)
     print(f"Time Taken: {time.time() - st:.2f} sec")

@@ -17,7 +17,7 @@ from model.detector import Detector
 from model.utils import load_model_checkpoint, project_bboxes
 
 
-category_list = [5]
+category_list = Config.category_list
 
 # torch.autograd.set_detect_anomaly(True)
 # Dataset
@@ -53,6 +53,8 @@ class CocoDataset(Dataset):
             return [x,y,x+w,y+h]
         bbox = list(map(bbox_helper, filter(lambda x: x[1] in category_list, box_category)))
         bbox = torch.tensor(bbox)
+        class_indx = list(map(lambda x: category_list[x[1]], filter(lambda x: x[1] in category_list, box_category)))
+        class_indx = torch.tensor(class_indx).long()
         # print(_id, bbox)
         # project bbox to resize image scale
         bbox = project_bboxes(
@@ -63,8 +65,9 @@ class CocoDataset(Dataset):
         if k != 0:
             invalid_pad = torch.ones((k,4)) * -1
             bbox = torch.concat([bbox, invalid_pad])
-        
+            class_indx = torch.concat([class_indx, torch.zeros(k).long()])
         bbox = bbox[:self.config.max_bbox,:]
+        class_indx = class_indx[:self.config.max_bbox]
         
         image = self.transform(image)
         
@@ -72,7 +75,7 @@ class CocoDataset(Dataset):
             # grey scale
             image = torch.concat([image, image, image], axis=0)
         
-        return image, bbox
+        return image, bbox, class_indx
 
     def __len__(self):
         return len(self.image_id)
@@ -129,13 +132,13 @@ def run_step(epoch, dataloader, model, optimizer, train=True, device=torch.devic
     itr = tqdm(dataloader, total=len(dataloader))
     model = model.train(train)
     total_loss = 0
-    avg_reg_loss, avg_cls_loss = 0, 0
+    avg_reg_loss, avg_cls_loss, avg_classify_loss = 0, 0, 0
     mode = "train" if train else "eval"
     for i, batch in enumerate(itr):
         optimizer.zero_grad()
-        images, bbox = batch[0].to(device), batch[1].to(device)
-        proposal, cls_loss, reg_loss = model(images, bbox)
-        loss = cls_loss + reg_loss
+        images, bbox, gt_class = batch[0].to(device), batch[1].to(device), batch[2].to(device)
+        proposal, cls_loss, reg_loss, classification_loss = model(images, bbox, gt_class)
+        loss = cls_loss + reg_loss + classification_loss
         if train:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
             loss.backward()
@@ -144,7 +147,8 @@ def run_step(epoch, dataloader, model, optimizer, train=True, device=torch.devic
             total_loss += loss.item()
             avg_cls_loss += cls_loss.item()
             avg_reg_loss += reg_loss.item()
-        itr.set_description(f"Epoch({mode}): {epoch}, T_Loss:{loss.item():.3f}({total_loss/(1+i) :.3f}), cls_loss: {cls_loss.item():.3f}({avg_cls_loss/(1+i):.3f}), reg_loss: {reg_loss.item():.3f}({avg_reg_loss/(1+i):.3f})")
+            avg_classify_loss += classification_loss.item()
+        itr.set_description(f"Epoch({mode}): {epoch}, T_Loss:{loss.item():.3f}({total_loss/(1+i) :.3f}), cls_loss: {cls_loss.item():.3f}({avg_cls_loss/(1+i):.3f}), reg_loss: {reg_loss.item():.3f}({avg_reg_loss/(1+i):.3f}), class_loss: {classification_loss.item():.3f}({avg_classify_loss/(1+i):.3f})")
     return total_loss / len(dataloader)
     
     
